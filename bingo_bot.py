@@ -14,7 +14,7 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 GAME_NUMBERS = list(range(1, 76)) # Standard Bingo numbers 1-75
 
 # --- CRUCIAL: ADMIN SETUP ---
-# ADMIN ID IS NOW SET TO YOUR PROVIDED VALUE
+# ADMIN ID IS SET TO YOUR PROVIDED VALUE
 ADMIN_CHAT_ID = 7932072571 
 
 # Financial Constants
@@ -171,22 +171,25 @@ def format_card_display(card_numbers_str: str, drawn_numbers: list[int]) -> str:
     display = "    B  I  N  G  O\n"
     display += "------------------\n"
 
+    # Mapping English digits to Amharic digits for number display
+    amharic_digit_map = zip("0123456789", "፩፪፫፬፭፮፯፰፱")
+
     for row in grid:
         row_display = []
         for num in row:
+            # Convert number to Amharic digits string
+            amharic_num = "".join(str(num).replace(d, a) for d, a in amharic_digit_map)
+
             if num in drawn_numbers:
                 # Mark with green check (✅) and bold
                 if num == 0:
                     row_display.append("**F✅**") # Free Space
                 else:
-                    # Using Amharic numbers for display as requested
-                    amharic_num = "".join(str(num).replace(d, a) for d, a in zip("0123456789", "፩፪፫፬፭፮፯፰፱"))
                     row_display.append(f"**{amharic_num}✅**")
             else:
                 if num == 0:
                     row_display.append(" F ")
                 else:
-                    amharic_num = "".join(str(num).replace(d, a) for d, a in zip("0123456789", "፩፪፫፬፭፮፯፰፱"))
                     row_display.append(f" {amharic_num} ")
         display += "| " + " | ".join(row_display) + " |\n"
     
@@ -194,7 +197,6 @@ def format_card_display(card_numbers_str: str, drawn_numbers: list[int]) -> str:
 
 def generate_player_name(is_male: bool) -> str:
     """Generates a random Ethiopian name for stealth players."""
-    # List of common Ethiopian names (90% male requested)
     male_names = ["Kidus", "Abebe", "Yonas", "Elias", "Tewodros", "Tesfaye", "Moges", "Daniel", "Samson", "Dawit", "Araya", "Fikru", "Gebre", "Haile"]
     female_names = ["Hana", "Mahlet", "Tsehay", "Eden", "Lidiya", "Tigist", "Marta", "Zelalem", "Selam", "Fikir"]
 
@@ -254,8 +256,8 @@ async def new_game_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
 
     # 2. Get real players with cards and deduct game cost
-    # Only players who have a card assigned are "in the game"
-    real_players_with_cards = db.query(User).join(GameCard).filter(User.balance >= GAME_COST).all()
+    # Only players who have a card assigned are "in the game" and have balance >= GAME_COST
+    real_players_with_cards = db.query(User).join(GameCard).filter(User.balance >= GAME_COST, User.telegram_id > 0).all()
     real_player_count = len(real_players_with_cards)
     
     if real_player_count == 0:
@@ -345,8 +347,6 @@ async def draw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     # Announce with sound delay
     column = get_bingo_column(drawn_number)
     
-    # Placeholder for sound trigger. Telegram has no built-in sound command. 
-    # We simulate sound by sending a notification bell emoji.
     await update.message.reply_text("🔔") 
     await asyncio.sleep(CALL_DELAY) 
         
@@ -390,7 +390,6 @@ async def getcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     # Check balance
-    # Note: Cost is deducted on /newgame, but players must have enough balance here to get the card.
     if user.balance < GAME_COST: 
         await update.message.reply_text(AMHARIC["not_enough_balance"])
         return
@@ -403,7 +402,6 @@ async def getcard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     db.add(card)
     db.commit()
 
-    # The card ID here is just the internal ID, the 1-200 feature is structural
     await update.message.reply_text(AMHARIC["card_success"].format(card_id=card.id))
 
 async def mycard_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -441,7 +439,6 @@ async def bingo_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     drawn_list = [int(n) for n in active_game.numbers_drawn.split(',') if n]
     
-    # Check if a computer has already won, which would have ended the game
     if not active_game.is_active:
         await update.message.reply_text(AMHARIC["not_active"])
         return
@@ -462,20 +459,14 @@ async def handle_winner(bot: Bot, active_game: ActiveGame, winner: User, db: Ses
     if winner.telegram_id > 0:
         winner.balance += prize_amount
         
-        # Referral Bonus Check (Simplified: Should run only on first game, but for now runs on any win)
-        if winner.referred_by_id:
-            referrer = db.query(User).filter(User.id == winner.referred_by_id).first()
-            if referrer:
-                 # Check if this user has already deposited (complex to track, for now, we grant the bonus on win)
-                 # A proper system would check if the new player has completed their FIRST deposit > 50 ETB
-                 # For simplicity: Assume the new player has deposited by this point to win.
-                referrer.balance += 10.0 # 10 ETB referral bonus
-                
+        # Referral Bonus Check: Added 10 ETB logic is handled in admin_credit_command
+        
     # 1. Announce Winner
-    winner_name = winner.username if winner.telegram_id > 0 else winner.username # Computer name remains a mystery
+    winner_name = winner.username if winner.telegram_id > 0 else winner.username 
     
+    # Send winner announcement to the chat where the game is played (assuming the last update chat is the game chat)
     await bot.send_message(
-        chat_id=bot.get_chat(active_game.id), # Send to the chat where the game is played
+        chat_id=bot.get_chat(active_game.id) if active_game.id else winner.telegram_id, 
         text=AMHARIC["winner_announcement"].format(name=winner_name, prize=prize_amount)
     )
     
@@ -502,26 +493,23 @@ async def deposit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     
 async def handle_deposit_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Forwards receipt images to the Admin for manual verification."""
-    # Ensure this handler only responds to private messages or if in the correct group
-    if update.effective_chat.type not in ["private", "group", "supergroup"]:
-        return 
+    if update.effective_chat.type not in ["private"]:
+        return # Only process receipts sent in private chat with the bot
 
     if not (update.message.photo or update.message.document):
-        return # Ignore non-photo/non-document messages
+        return
 
     user_id = update.effective_user.id
     username = update.effective_user.username or "N/A"
     
     caption = AMHARIC["deposit_forward_admin"].format(user_id=user_id, username=username)
 
-    # Forward the message itself, ensuring photo/document is included
     await context.bot.forward_message(
         chat_id=ADMIN_CHAT_ID,
         from_chat_id=update.effective_chat.id,
         message_id=update.message.message_id
     )
     
-    # Send an explanatory caption separately
     await context.bot.send_message(
         chat_id=ADMIN_CHAT_ID,
         text=caption
@@ -540,7 +528,6 @@ async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
         
     if len(context.args) < 2:
-        # Show balance and format info
         return await update.message.reply_text(AMHARIC["withdraw_info"].format(user.balance))
 
     try:
@@ -564,7 +551,6 @@ async def withdraw_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         telebirr=telebirr_account
     )
     
-    # Admin must approve/deny and manually revert the balance if denied.
     await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=caption)
     
     await update.message.reply_text(AMHARIC["withdrawal_request"])
@@ -587,7 +573,6 @@ async def referral_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     user = db.query(User).filter(User.telegram_id == user_id).first()
     
     if user:
-        # Referral link structure: t.me/MegaBingoBot?start=REFCODE
         bot_info = await context.bot.get_me()
         referral_link = f"https://t.me/{bot_info.username}?start={user.referral_code}"
         
@@ -599,47 +584,26 @@ async def referral_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def agent_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Info for agents."""
-    # This command is for future expansion to fully implement the agent dashboard/features.
     await update.message.reply_text(AMHARIC["agent_info"])
 
 
-# --- 6. MAIN FUNCTION ---
-
-def main() -> None:
-    """Start the bot using Polling Mode on Replit."""
-    
-    if not BOT_TOKEN:
-        logging.error("TELEGRAM_BOT_TOKEN environment variable is not set. The bot cannot start.")
+# --- ADMIN HANDLERS ---
+async def admin_credit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin-only command to manually add funds to a user's balance."""
+    if update.effective_user.id != ADMIN_CHAT_ID:
         return
         
-    if ADMIN_CHAT_ID == "YOUR_ADMIN_CHAT_ID_HERE":
-        logging.error("ADMIN_CHAT_ID is not set. Deposit/Withdrawal forwarding will fail.")
+    db: SessionLocal = next(get_db_session())
+    
+    if len(context.args) != 2:
+        await update.message.reply_text("Admin: Invalid format. Use /admin_credit [user_id] [amount]")
+        return
         
-    # Initialize Database
-    init_db()
+    try:
+        target_user_id = int(context.args[0])
+        amount = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text("Admin: User ID must be integer, amount must be number.")
+        return
 
-    application = Application.builder().token(BOT_TOKEN).build()
-
-    # Register Command Handlers
-    application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("newgame", new_game_command))
-    application.add_handler(CommandHandler("draw", draw_command))
-    application.add_handler(CommandHandler("getcard", getcard_command))
-    application.add_handler(CommandHandler("mycard", mycard_command))
-    application.add_handler(CommandHandler("bingo", bingo_command))
-    application.add_handler(CommandHandler("deposit", deposit_command))
-    application.add_handler(CommandHandler("withdraw", withdraw_command))
-    application.add_handler(CommandHandler("balance", balance_command))
-    application.add_handler(CommandHandler("referral", referral_command))
-    application.add_handler(CommandHandler("agent", agent_command))
-    
-    # Register Message Handler for Deposit Receipts (Images/Documents)
-    # This catches images sent in private chat or the group chat
-    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL & filters.ChatType.PRIVATE, handle_deposit_receipt))
-    
-    # Start the Bot in Polling Mode
-    print("Starting MegaBingo Bot (V2.0) in Polling mode...")
-    application.run_polling(poll_interval=1.0)
-
-if __name__ == '__main__':
-    main()
+    user = db.query(User).filter(User
