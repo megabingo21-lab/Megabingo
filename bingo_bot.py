@@ -606,4 +606,106 @@ async def admin_credit_command(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text("Admin: User ID must be integer, amount must be number.")
         return
 
-    user = db.query(User).filter(User
+    user = db.query(User).filter(User.telegram_id == target_user_id).first()
+    
+    if not user:
+        await update.message.reply_text(f"Admin: User ID {target_user_id} not found in database.")
+        return
+
+    # Grant the credit
+    user.balance += amount
+    db.commit()
+    
+    # Referral Bonus Check (Simplified: Check if they were referred and grant 10 ETB)
+    if user.referred_by_id:
+        referrer = db.query(User).filter(User.id == user.referred_by_id).first()
+        if referrer:
+            referrer.balance += 10.0 # 10 ETB referral bonus
+            db.commit()
+            
+            await context.bot.send_message(
+                chat_id=referrer.telegram_id,
+                text=f"🎁 እንኳን ደስ አለዎት! ጓደኛዎ ሂሳብ አስገብቶል! 10.00 ብር በሂሳብዎ ላይ ተጨምሯል።"
+            )
+
+    await update.message.reply_text(
+        f"✅ Admin: Successfully credited {amount:.2f} ETB to user {target_user_id}. New Balance: {user.balance:.2f} ETB."
+    )
+    
+async def admin_debit_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Admin-only command to manually deduct funds from a user's balance."""
+    if update.effective_user.id != ADMIN_CHAT_ID:
+        return
+        
+    db: SessionLocal = next(get_db_session())
+    
+    if len(context.args) != 2:
+        await update.message.reply_text("Admin: Invalid format. Use /admin_debit [user_id] [amount]")
+        return
+        
+    try:
+        target_user_id = int(context.args[0])
+        amount = float(context.args[1])
+    except ValueError:
+        await update.message.reply_text("Admin: User ID must be integer, amount must be number.")
+        return
+
+    user = db.query(User).filter(User.telegram_id == target_user_id).first()
+    
+    if not user:
+        await update.message.reply_text(f"Admin: User ID {target_user_id} not found in database.")
+        return
+
+    # Deduct the amount
+    if user.balance < amount:
+        await update.message.reply_text(f"Admin: WARNING - User {target_user_id} balance ({user.balance:.2f}) is less than debit amount ({amount:.2f}).")
+    
+    user.balance -= amount
+    db.commit()
+
+    await update.message.reply_text(
+        f"✅ Admin: Successfully debited {amount:.2f} ETB from user {target_user_id}. New Balance: {user.balance:.2f} ETB."
+    )
+
+
+# --- 6. MAIN FUNCTION ---
+
+def main() -> None:
+    """Start the bot using Polling Mode on Replit."""
+    
+    if not BOT_TOKEN:
+        logging.error("TELEGRAM_BOT_TOKEN environment variable is not set. The bot cannot start.")
+        return
+        
+    # Initialize Database
+    init_db()
+
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    # Register Command Handlers
+    application.add_handler(CommandHandler("start", start_command))
+    application.add_handler(CommandHandler("newgame", new_game_command))
+    application.add_handler(CommandHandler("draw", draw_command))
+    application.add_handler(CommandHandler("getcard", getcard_command))
+    application.add_handler(CommandHandler("mycard", mycard_command))
+    application.add_handler(CommandHandler("bingo", bingo_command))
+    application.add_handler(CommandHandler("deposit", deposit_command))
+    application.add_handler(CommandHandler("withdraw", withdraw_command))
+    application.add_handler(CommandHandler("balance", balance_command))
+    application.add_handler(CommandHandler("referral", referral_command))
+    application.add_handler(CommandHandler("agent", agent_command))
+    
+    # --- ADMIN HANDLERS ---
+    application.add_handler(CommandHandler("admin_credit", admin_credit_command))
+    application.add_handler(CommandHandler("admin_debit", admin_debit_command))
+    # ----------------------
+    
+    # Register Message Handler for Deposit Receipts (Images/Documents)
+    application.add_handler(MessageHandler(filters.PHOTO | filters.Document.ALL & filters.ChatType.PRIVATE, handle_deposit_receipt))
+    
+    # Start the Bot in Polling Mode
+    print("Starting MegaBingo Bot (V2.1) in Polling mode...")
+    application.run_polling(poll_interval=1.0)
+
+if __name__ == '__main__':
+    main()
