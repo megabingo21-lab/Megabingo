@@ -9,6 +9,31 @@ from datetime import datetime
 from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey, Float, select
 from sqlalchemy.orm import sessionmaker, declarative_base, relationship
 
+# --- REPLIT STABILIZATION FIX (KEEPS BOT ONLINE 24/7) ---
+import threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import time
+
+class ReplitKeepAlive(BaseHTTPRequestHandler):
+    """A minimal HTTP server handler to keep the Replit port open."""
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/html')
+        self.end_headers()
+        self.wfile.write(b"MegaBingo Bot is awake and polling Telegram...")
+
+def run_server():
+    """Runs the web server in the background."""
+    # Use port 8080 as it's common for Replit
+    server_address = ('', 8080) 
+    httpd = HTTPServer(server_address, ReplitKeepAlive)
+    httpd.serve_forever()
+    
+# RUN THE SERVER IN A SEPARATE THREAD
+threading.Thread(target=run_server).start() 
+# --- END REPLIT STABILIZATION FIX ---
+
+
 # --- 1. CONFIGURATION ---
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
 # YOUR ADMIN ID
@@ -24,7 +49,7 @@ LOBBY_TIME = 10    # Seconds for countdown
 
 # --- 2. LOCALIZATION (AMHARIC) ---
 AMHARIC = {
-    "welcome": "👋 **እንኳን ወደ ሜጋ ቢንጎ በደህና መጡ!**\n\nጨዋታ ለመጀመር ወይም ለመቀላቀል `/play` የሚለውን ትእዛዝ ይጠቀሙ።\n\nሂሳብ ለመሙላት: `/deposit`\nደንብ: `/rules`",
+    "welcome": "👋 **እንኳን ወደ ሜጋ ቢንጎ በደህና መጡ!**\n\nጨዋታ ለመጀመር ወይም ለመቀላቀል `/play [1-200]` የሚለውን ትእዛዝ ይጠቀሙ።\n\nሂሳብ ለመሙላት: `/deposit`\nደንብ: `/rules`",
     "rules": "📜 **የጨዋታ ህጎች**:\n1. ለመጫወት 20 ብር ያስፈልጋል።\n2. ከ 1-200 የቢንጎ ካርድ ይምረጡ።\n3. ጨዋታው በራስ-ሰር ቁጥሮችን ይጠራል።\n4. አሸናፊው 80% ጠቅላላውን ገንዘብ ይወስዳል።\n5. ማንኛውም ችግር ካለ አድሚኑን ያናግሩ።",
     "balance": "💰 **የእርስዎ ሂሳብ:** {amount:.2f} ብር",
     "deposit_info": "💳 **ገንዘብ ለማስገባት:**\n\nወደ ቴሌብር ቁጥር **0997077778** ይላኩ።\nደረሰኙን (Receipt) ፎቶ አንስተው ወደዚህ ቦት ይላኩ።\nአድሚኑ ሲያረጋግጥ ሂሳብዎ ይሞላል።",
@@ -114,8 +139,8 @@ def generate_layout():
 
 def get_board_display(layout_str, drawn_list, title="YOUR CARD"):
     nums = [int(x) for x in layout_str.split(",")]
-    # Amharic mapping
-    am = lambda x: "".join([{'0':'፩','1':'፪','2':'፫','3':'፬','4':'፭','5':'፮','6':'፯','7':'፰','8':'፱','9':'0'}.get(d,d) for d in str(x)]) if x!=0 else "F"
+    # Amharic mapping helper function (kept simple)
+    # am = lambda x: "".join([{'0':'፩','1':'፪','2':'፫','3':'፬','4':'፭','5':'፮','6':'፯','7':'፰','8':'፱','9':'0'}.get(d,d) for d in str(x)]) if x!=0 else "F"
     
     drawn_set = set(drawn_list)
     drawn_set.add(0) # Free space always drawn
@@ -126,11 +151,14 @@ def get_board_display(layout_str, drawn_list, title="YOUR CARD"):
         for c in range(5):
             idx = r * 5 + c
             val = nums[idx]
-            mark = "✅" if val in drawn_set else ""
-            txt = "FREE" if val == 0 else str(val) # Using English numbers for readabilty on grid, Amharic for style if preferred
-            # Let's keep numbers English in grid for alignment, Amharic in text
-            cell = f"{txt}{mark}"
-            row_str += f"{cell:^6}|" 
+            
+            # Display: Use bold/checkmark for marked numbers
+            if val in drawn_set:
+                txt = f"**{val}✅**" if val != 0 else "**F✅**"
+            else:
+                txt = str(val) if val != 0 else " F "
+                
+            row_str += f"{txt:^6}|" 
         rows.append(row_str[:-1])
     
     board = "   B  |  I  |  N  |  G  |  O\n"
@@ -159,22 +187,21 @@ def check_win(layout_str, drawn_list):
 async def run_game_loop(app: Application):
     """Background task that manages the game state."""
     while True:
-        await asyncio.sleep(1) # Check state every second
+        # Avoid hammering the DB when IDLE
+        await asyncio.sleep(1 if db.query(ActiveGame).first().state != "IDLE" else 5)
         
         db = SessionLocal()
         game = db.query(ActiveGame).first()
         
         if not game:
-            game = ActiveGame()
+            game = ActiveGame(state="IDLE")
             db.add(game)
             db.commit()
             db.close()
             continue
             
         if game.state == "LOBBY":
-            # Countdown logic is handled in the Play command mostly, 
-            # but we can finalize it here if time expires.
-            # ideally, the command triggers a task.
+            # State is handled by start_game_sequence timer, loop just maintains.
             pass
             
         elif game.state == "RUNNING":
@@ -185,9 +212,8 @@ async def run_game_loop(app: Application):
             if not remaining:
                 game.state = "IDLE"
                 db.commit()
-                # Notify Game Over
                 try:
-                    await app.bot.send_message(chat_id=game.chat_id, text="Game Over! No numbers left.")
+                    await app.bot.send_message(chat_id=game.chat_id, text="ጨዋታ አልቋል! አዲስ ጨዋታ ይጀምሩ።")
                 except: pass
                 db.close()
                 continue
@@ -200,7 +226,6 @@ async def run_game_loop(app: Application):
             
             # Announce
             col = "B" if num<=15 else "I" if num<=30 else "N" if num<=45 else "G" if num<=60 else "O"
-            # We can't show everyone's board, just the number.
             msg = AMHARIC["draw_msg"].format(col=col, num=num, board="") 
             try:
                 await app.bot.send_message(chat_id=game.chat_id, text=msg)
@@ -216,8 +241,7 @@ async def run_game_loop(app: Application):
                     winners.append(p)
             
             if winners:
-                # If multiple, pick first (or split). Let's pick first.
-                w = winners[0]
+                w = winners[0] # The first one detected wins
                 prize = game.pool * (1 - COMMISSION_RATE)
                 
                 # Pay if real
@@ -225,6 +249,7 @@ async def run_game_loop(app: Application):
                     u = db.query(User).filter_by(id=w.user_id).first()
                     u.balance += prize
                 
+                # Announce winner and reset
                 try:
                     await app.bot.send_message(
                         chat_id=game.chat_id, 
@@ -232,7 +257,6 @@ async def run_game_loop(app: Application):
                     )
                 except: pass
                 
-                # Reset Game
                 game.state = "IDLE"
                 game.drawn_numbers = ""
                 game.pool = 0
@@ -240,9 +264,8 @@ async def run_game_loop(app: Application):
                 db.commit()
             
             db.close()
-            # WAIT DELAY
             await asyncio.sleep(CALL_DELAY) 
-            continue # Skip the close at bottom, loop again
+            continue 
             
         db.close()
 
@@ -252,9 +275,15 @@ async def start_game_sequence(app: Application, chat_id):
     game = db.query(ActiveGame).first()
     
     # 1. Countdown
+    msg_id = None
     for i in range(LOBBY_TIME, 0, -1):
         try:
-            await app.bot.send_message(chat_id=chat_id, text=AMHARIC["lobby_wait"].format(seconds=i))
+            msg_text = AMHARIC["lobby_wait"].format(seconds=i)
+            if msg_id:
+                await app.bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text=msg_text)
+            else:
+                msg = await app.bot.send_message(chat_id=chat_id, text=msg_text)
+                msg_id = msg.message_id
         except: pass
         await asyncio.sleep(1)
         
@@ -262,31 +291,34 @@ async def start_game_sequence(app: Application, chat_id):
     real_count = db.query(GamePlayer).filter_by(is_computer=False).count()
     if real_count > 0 and real_count < 20:
         comp_needed = random.randint(20, 49)
-        # Add computers
+        
+        # Get card IDs already taken by players
+        taken_card_ids = [p.card_template_id for p in db.query(GamePlayer).all()]
+        available_card_ids = [i for i in range(1, 201) if i not in taken_card_ids]
+        
         for _ in range(comp_needed):
-            # Pick random card 1-200
-            tid = random.randint(1, 200)
+            if not available_card_ids: break # Stop if all cards are taken
+            
+            tid = random.choice(available_card_ids)
+            available_card_ids.remove(tid)
+            
             name_pool = ["Kidus", "Yonas", "Hana", "Tigist", "Abebe", "Marta"]
             name = f"{random.choice(name_pool)}{random.randint(10,99)}"
-            # Neg ID for comps
             cp = GamePlayer(user_id=-1, card_template_id=tid, is_computer=True, name=name)
             db.add(cp)
-            # Increase pool (Computers 'pay' to make it look real)
-            game.pool += GAME_COST
+            game.pool += GAME_COST # Computers 'pay'
     
     # 3. Start
     game.state = "RUNNING"
     game.chat_id = chat_id
     db.commit()
     
-    # Send Start Msg
     tot = db.query(GamePlayer).count()
     try:
-        await app.bot.send_message(chat_id=chat_id, text=f"🚀 **ጨዋታው ተጀምሯል!**\nጠቅላላ ተጫዋቾች: {tot}")
+        await app.bot.send_message(chat_id=chat_id, text=f"🚀 **ጨዋታው ተጀምሯል!**\nጠቅላላ ተጫዋቾች: {tot}\n\nየመጀመሪያው ቁጥር በ {CALL_DELAY:.2f} ሰከንድ ውስጥ ይወጣል።")
     except: pass
     
     db.close()
-    # The run_game_loop will pick up the "RUNNING" state automatically.
 
 # --- 6. COMMAND HANDLERS ---
 
@@ -294,14 +326,12 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     db = SessionLocal()
     
-    # Create User if not exists
     user = db.query(User).filter_by(telegram_id=user_id).first()
     if not user:
         user = User(telegram_id=user_id, username=update.effective_user.username, balance=0.0)
         db.add(user)
         db.commit()
         
-    # Parse Card ID
     if not context.args:
         await update.message.reply_text(AMHARIC["choose_card"])
         db.close()
@@ -311,36 +341,37 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         card_choice = int(context.args[0])
         if not (1 <= card_choice <= 200): raise ValueError
     except:
-        await update.message.reply_text("⛔ 1-200 ብቻ።")
+        await update.message.reply_text("⛔ የካርድ ቁጥር ከ 1-200 ብቻ መሆን አለበት።")
         db.close()
         return
         
-    # Check Balance
     if user.balance < GAME_COST:
         await update.message.reply_text(AMHARIC["balance_err"])
         db.close()
         return
         
     game = db.query(ActiveGame).first()
-    if not game: 
-        game = ActiveGame(state="IDLE")
-        db.add(game)
-        db.commit()
+    if not game: game = ActiveGame(state="IDLE")
         
     if game.state == "RUNNING":
         await update.message.reply_text(AMHARIC["game_running_err"])
         db.close()
         return
 
-    # Join Logic
-    # Check if already joined
     exists = db.query(GamePlayer).filter_by(user_id=user.id).first()
     if exists:
-        await update.message.reply_text("✅ ተመዝግበዋል።")
+        await update.message.reply_text("✅ አስቀድመው ተመዝግበዋል።")
         db.close()
         return
 
-    # Deduct & Add
+    # Check if card is already taken in the lobby
+    card_taken = db.query(GamePlayer).filter_by(card_template_id=card_choice).first()
+    if card_taken:
+        await update.message.reply_text("⛔ ይህ ካርድ ተወስዷል። ሌላ ቁጥር ይምረጡ።")
+        db.close()
+        return
+
+
     user.balance -= GAME_COST
     game.pool += GAME_COST
     
@@ -348,17 +379,14 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add(player)
     db.commit()
     
-    # Get Card Layout for display
     tmpl = db.query(CardTemplate).filter_by(id=card_choice).first()
     board_view = get_board_display(tmpl.layout, [])
     
     await update.message.reply_text(AMHARIC["card_assigned"].format(id=card_choice, board=board_view), parse_mode="Markdown")
     
-    # If IDLE, Switch to LOBBY and start timer
     if game.state == "IDLE":
         game.state = "LOBBY"
         db.commit()
-        # Start background task for countdown
         asyncio.create_task(start_game_sequence(context.application, update.effective_chat.id))
         
     db.close()
@@ -369,16 +397,16 @@ async def mycard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = db.query(User).filter_by(telegram_id=user_id).first()
     game = db.query(ActiveGame).first()
     
-    if not user or not game: return
-    
+    if not user: return
+
     player = db.query(GamePlayer).filter_by(user_id=user.id).first()
     if not player:
-        await update.message.reply_text("⛔ በጨዋታው ውስጥ የለዎትም።")
+        await update.message.reply_text("⛔ በጨዋታው ውስጥ የለዎትም። /play ይጠቀሙ።")
         db.close()
         return
         
     tmpl = db.query(CardTemplate).filter_by(id=player.card_template_id).first()
-    drawn = [int(x) for x in game.drawn_numbers.split(",")] if game.drawn_numbers else []
+    drawn = [int(x) for x in game.drawn_numbers.split(",")] if game and game.drawn_numbers else []
     
     board = get_board_display(tmpl.layout, drawn)
     await update.message.reply_text(board, parse_mode="Markdown")
@@ -413,8 +441,12 @@ async def withdraw_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     uid = update.effective_user.id
-    amt = float(context.args[0])
-    acc = context.args[1]
+    try:
+        amt = float(context.args[0])
+        acc = context.args[1]
+    except ValueError:
+        await update.message.reply_text("⛔ ትክክለኛ መጠን ያስገቡ።")
+        return
     
     db = SessionLocal()
     user = db.query(User).filter_by(telegram_id=uid).first()
@@ -442,7 +474,8 @@ async def admin_credit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.commit()
             await update.message.reply_text(AMHARIC["success_credit"].format(amt=amt, uid=uid))
         db.close()
-    except: pass
+    except: 
+        await update.message.reply_text("Admin: /admin_credit [user_id] [amount]")
 
 async def admin_debit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_CHAT_ID: return
@@ -455,7 +488,8 @@ async def admin_debit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             db.commit()
             await update.message.reply_text(AMHARIC["success_debit"].format(amt=amt, uid=uid))
         db.close()
-    except: pass
+    except: 
+        await update.message.reply_text("Admin: /admin_debit [user_id] [amount]")
 
 # --- MAIN ---
 def main():
@@ -463,6 +497,7 @@ def main():
         print("Set TELEGRAM_BOT_TOKEN")
         return
 
+    # Initialize DB and Card Templates
     init_db()
     
     app = Application.builder().token(BOT_TOKEN).build()
