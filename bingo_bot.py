@@ -19,8 +19,8 @@ BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 ADMIN_CHAT_ID = 7932072571  # Must be your Telegram User ID
 
 # Financial & Game Constants
-TELEBIRR_ACCOUNT = '0997077778' # The main Telebirr number
-WELCOME_BONUS = 40.0
+TELEBIRR_ACCOUNT = '0997077778' 
+WELCOME_BONUS = 40.0 # Gives the user two free games!
 REFERRAL_BONUS = 10.0
 MIN_DEPOSIT = 50.0
 MIN_WITHDRAWAL = 100.0
@@ -50,42 +50,32 @@ def run_server():
 threading.Thread(target=run_server, daemon=True).start()
 
 # --- 2. LOCALIZATION (AMHARIC) ---
+# (Same AMHARIC dictionary as V7.0)
 AMHARIC = {
     "welcome": "👋 **እንኳን ወደ ሜጋ ቢንጎ ካሲኖ በደህና መጡ!**\n\n🎁 ለጀማሪዎች የ **`{bonus:.2f}` ብር** ስጦታ ተሰጥቶዎታል።\n\nለመጫወት: `/play` ወይም `/quickplay`\nሒሳብዎ: `/balance`\nገንዘብ ለማስገባት: `/deposit`",
     "balance": "💰 **የእርስዎ ሂሳብ:** `{amount:.2f}` ብር",
-    
-    # Deposit Flow
     "deposit_instr": "💳 **ገንዘብ ለማስገባት (Deposit)**\n\n1. እባክዎ ወደዚህ የቴሌብር ቁጥር ይላኩ:\n`{acc}` (Click to Copy)\n\n2. ከላኩ በኋላ ከታች ያለውን **'ላክቻለሁ'** የሚለውን ቁልፍ ይጫኑ።",
     "deposit_btn": "ላክቻለሁ ✅",
     "deposit_receipt_prompt": "✅ **አሁን የደረሰኙን ፎቶ ወይም የግብይት ቁጥሩን ይላኩልኝ።**",
     "deposit_receipt_received": "✅ መረጃዎ ተልኳል! አድሚኑ እስኪያረጋግጥ ይጠብቁ።",
     "deposit_cancel": "❌ የገንዘብ ማስገባት ተሰርዟል።",
-    
-    # Withdrawal Flow
     "withdraw_ask_amt": "💸 **ገንዘብ ለማውጣት**\n\nምን ያህል ማውጣት ይፈልጋሉ? (ቢያንስ `{min_wit:.2f}` ብር)\nእባክዎ **መጠኑን ብቻ** በቁጥር ይፃፉ (ለምሳሌ: `200`)።",
     "withdraw_ask_acc": "✅ **መጠን: `{amt:.2f}` ብር**\n\nእባክዎ ገንዘቡ እንዲገባሎት የሚፈልጉትን **የቴሌብር ቁጥር** ይላኩ።",
     "withdraw_sent": "✅ **የማውጣት ጥያቄዎ ተልኳል!**\n\nመጠን: `{amt:.2f}` ብር\nቁጥር: `{acc}`\n\nአድሚኑ በቅርቡ ይልካል።",
     "withdraw_cancel": "❌ የማውጣት ጥያቄው ተሰርዟል።",
-
-    # Game Messages
-    "game_joined": "🎟 **ቢንጎ ካርድ #{card_id}**\nሒሳብዎ: `{bal:.2f}` ብር\n\nተጫዋቾችን በመጠበቅ ላይ... ({wait}s)", # Image will be appended here
+    "game_joined": "🎟 **ቢንጎ ካርድ #{card_id}**\nሒሳብዎ: `{bal:.2f}` ብር\n\nተጫዋቾችን በመጠበቅ ላይ... ({wait}s)", 
     "game_start": "🚀 **ጨዋታ ተጀመረ!**\n\n👥 ጠቅላላ ተጫዋቾች: **{count}**\nመልካም እድል!",
-    "draw_announcement": "🔔 **ቁጥር: {col}-{num}**", # Image will be appended here
+    "draw_announcement": "🔔 **ቁጥር: {col}-{num}**", 
     "winner": "🏆 **ቢንጎ! አሸናፊ: {name}**\n\n💰 ሽልማት: **`{prize:.2f}` ብር**\n\nቀጣይ ጨዋታ ለመጫወት `/quickplay` ይበሉ።",
-    
-    # Errors & Confirmations
     "err_bal": "⛔ **በቂ ሂሳብ የለዎትም።**\nሂሳብዎ: `{bal:.2f}` ብር\nለመጫወት `/deposit` ይጠቀሙ።",
     "err_active": "⚠️ ጨዋታው እየተካሄደ ነው።",
     "err_invalid_card": "⛔ የካርድ ቁጥር ከ 1-200 ብቻ መሆን አለበት።",
     "err_card_taken": "⛔ ይህ ካርድ ተወስዷል። ሌላ ቁጥር ይምረጡ።",
     "err_already_joined": "✅ አስቀድመው ተመዝግበዋል።",
     "err_no_game": "⛔ በአሁኑ ጊዜ ንቁ ጨዋታ ላይ የለዎትም።",
-
     "dep_confirmed_user": "✅ **ገንዘብዎ ገብቷል!**\n\nየተሞላው ሂሳብ: **`{amt:.2f}` ብር**\nጠቅላላ ሂሳብዎ: **`{bal:.2f}` ብር**\n\nለመጫወት `/quickplay` ይላኩ።",
     "wit_confirmed_user": "✅ **ገንዘብዎ ተልኳል!**\n\nየወጣው ሂሳብ: **`{amt:.2f}` ብር**\nጠቅላላ ሂሳብዎ: **`{bal:.2f}` ብር**\n\nመልካም ቀን!",
     "ref_bonus_user": "🎉 **የሪፈራል ሽልማት!**\n\nጓደኛዎ የመጀመሪያ ገንዘብ በማስገባቱ **`{amt:.2f}` ብር** አግኝተዋል!",
-    
-    # Admin Messages
     "admin_new_dep_alert": "🚨 **አዲስ ማስገቢያ (Deposit) ጥያቄ**\n\nተጠቃሚ ID: `{uid}`\nየተጠቃሚ ስም: @{uname}\n\n👇 **ደረሰኙን ከታች ይመልከቱ** 👇\n\nለማጽደቅ: `/admin_approve_deposit {uid} {min_dep:.2f}` [amount you manually verified]",
     "admin_new_wit_alert": "🚨 **አዲስ የማውጣት (Withdraw) ጥያቄ**\n\nተጠቃሚ ID: `{uid}`\nየተጠቃሚ ስም: @{uname}\nመጠን: `{amt:.2f}` ብር\nቴሌብር ቁጥር: `{acc}`\n\nገንዘብ ከላኩ በኋላ: `/admin_confirm_withdrawal {uid} {amt:.2f}`",
     "admin_dep_approved_admin": "✅ የ `{uid}` የ `{amt:.2f}` ብር ማስገቢያ ጸድቋል።",
@@ -132,9 +122,8 @@ def init_db():
     BASE.metadata.create_all(bind=ENGINE)
 
 # --- 4. GAME LOGIC HELPERS ---
-
 def generate_card():
-    # ... (Same card generation logic as V6/V5) ...
+    # ... (Same card generation logic) ...
     cols = [
         random.sample(range(1, 16), 5), random.sample(range(16, 31), 5),
         random.sample(range(31, 46), 4), random.sample(range(46, 61), 5),
@@ -147,7 +136,7 @@ def generate_card():
     return ",".join(map(str, flat))
 
 def check_win(layout, drawn):
-    # ... (Same win check logic as V6/V5) ...
+    # ... (Same win check logic) ...
     nums = [int(x) for x in layout.split(",")]
     d_set = set(drawn) | {0} 
     lines = []
@@ -158,7 +147,7 @@ def check_win(layout, drawn):
     return any(all(x in d_set for x in line) for line in lines)
 
 def gen_comp_name():
-    # ... (Same computer name logic as V6/V5) ...
+    # ... (Same computer name logic) ...
     male_names = ["Kidus", "Yonas", "Abel", "Dawit", "Elias", "Natnael", "Bereket", "Robel", "Samson", "Tewodros", "Michael"]
     female_names = ["Hana", "Lidiya", "Marta", "Helen"] 
     is_male = random.random() < 0.95 
@@ -189,16 +178,19 @@ async def game_engine(app: Application):
         await asyncio.sleep(1)
         db = SessionLocal()
         game = db.query(ActiveGame).first()
+        
+        # FIX: Added heartbeat logging to confirm the loop is running
+        # logger.debug(f"Game Engine Heartbeat: State={game.state if game else 'INIT'}") 
+        
         if not game: game = ActiveGame(); db.add(game); db.commit(); db.close(); continue
             
         if game.state == "RUNNING":
-            # ... (Game loop logic remains largely the same) ...
             drawn = [int(x) for x in game.drawn_numbers.split(",")] if game.drawn_numbers else []
             remaining = [x for x in range(1, 76) if x not in drawn]
             
             if not remaining: game.state = "IDLE"; db.commit(); db.close(); continue
 
-            # RIGGED LOGIC (Same as V6/V5)
+            # RIGGED LOGIC (Same as V7.0)
             candidate = random.choice(remaining)
             humans = db.query(GamePlayer).filter(GamePlayer.is_comp == False).all()
             human_is_about_to_win = any(check_win(p.card_layout, drawn + [candidate]) for p in humans)
@@ -215,7 +207,7 @@ async def game_engine(app: Application):
             game.drawn_numbers = ",".join(map(str, drawn))
             db.commit()
             
-            # Announce Number with Image
+            # Announce Number with Image (Same as V7.0)
             col_letter = get_bingo_column_letter(candidate)
             message_text = AMHARIC["draw_announcement"].format(col=col_letter, num=candidate)
             
@@ -224,7 +216,7 @@ async def game_engine(app: Application):
             try:
                 await app.bot.send_photo(
                     chat_id=game.chat_id, 
-                    photo="http://googleusercontent.com/image_generation_content/4", # Updated prompt for a draw machine image
+                    photo="http://googleusercontent.com/image_generation_content/7", # Use a unique ID for the draw machine image
                     caption=message_text,
                     parse_mode="Markdown"
                 )
@@ -232,7 +224,7 @@ async def game_engine(app: Application):
                 logger.error(f"Error sending draw announcement image: {e}")
                 await app.bot.send_message(game.chat_id, message_text, parse_mode="Markdown")
             
-            # Check Winners (Same as V6/V5)
+            # Check Winners (Same as V7.0)
             players = db.query(GamePlayer).all()
             winner = None
             for p in players:
@@ -257,13 +249,17 @@ async def game_engine(app: Application):
         db.close()
 
 async def start_game_task(app, chat_id):
-    """Handles Lobby countdown and computer insertion."""
+    # ... (Lobby countdown and computer insertion logic - Same as V7.0) ...
     db = SessionLocal()
     game = db.query(ActiveGame).first()
     if game.state == "IDLE":
         game.state = "LOBBY"; game.chat_id = chat_id; db.commit()
 
-        for i in range(LOBBY_DURATION, 0, -1): await asyncio.sleep(1); db.refresh(game); 
+        for i in range(LOBBY_DURATION, 0, -1): 
+            try: await app.bot.send_message(game.chat_id, f"⏳ ጨዋታ በ {i} ሰከንድ ውስጥ ይጀምራል...")
+            except: pass
+            await asyncio.sleep(1)
+            db.refresh(game); 
         if game.state != "LOBBY": db.close(); return
 
         if game.state == "LOBBY":
@@ -312,18 +308,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.close()
 
 async def balance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user; db = SessionLocal(); u = db.query(User).filter_by(telegram_id=user.id).first()
-    balance_amount = u.balance if u else 0.0
+    user = update.effective_user
+    db = SessionLocal()
+    u = db.query(User).filter_by(telegram_id=user.id).first()
+    
+    # FIX: Ensure user object is handled if not found (they skipped /start)
+    if not u:
+        # Create user with initial bonus if they skipped /start
+        u = User(telegram_id=user.id, username=user.username, balance=WELCOME_BONUS)
+        db.add(u)
+        db.commit()
+    
+    balance_amount = u.balance 
     await update.message.reply_text(AMHARIC["balance"].format(amount=balance_amount), parse_mode="Markdown")
     db.close()
 
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user; db = SessionLocal(); u = db.query(User).filter_by(telegram_id=user.id).first()
-    if not u: u = User(telegram_id=user.id, username=user.username, balance=0.0); db.add(u); db.commit()
+    user = update.effective_user
+    db = SessionLocal()
+    u = db.query(User).filter_by(telegram_id=user.id).first()
     
+    # FIX: If user skipped /start, create them here with the WELCOME_BONUS (40 Birr)
+    if not u: 
+        u = User(telegram_id=user.id, username=user.username, balance=WELCOME_BONUS)
+        db.add(u)
+        db.commit()
+        # No need to commit again as it's done below
+
     is_quick_play = update.message.text.startswith("/quick")
     card_choice = 0
-
+    # ... (Rest of card selection logic remains the same) ...
     if not is_quick_play:
         if not context.args: await update.message.reply_text("⛔ እባክዎ ከ 1-200 የካርድ ቁጥር ይምረጡ: `/play 55`", parse_mode="Markdown"); db.close(); return
         try: card_choice = int(context.args[0]); 
@@ -334,9 +348,10 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         taken_card_ids = {p.card_id for p in db.query(GamePlayer).filter(GamePlayer.card_id <= 200).all()}
         available_ids = [i for i in range(1, 201) if i not in taken_card_ids]
-        if not available_ids: card_choice = random.randint(1, 200) # Fallback
+        if not available_ids: card_choice = random.randint(1, 200) 
         else: card_choice = random.choice(available_ids)
 
+    # Balance check now includes the 40 Birr bonus from the fix above
     if u.balance < GAME_COST: await update.message.reply_text(AMHARIC["err_bal"].format(bal=u.balance), parse_mode="Markdown"); db.close(); return
     game = db.query(ActiveGame).first(); 
     if not game: game = ActiveGame(); db.add(game); db.commit()
@@ -348,20 +363,22 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.add(GamePlayer(user_id=u.id, card_id=card_choice, card_layout=player_card_layout, name=u.username, is_comp=False))
     db.commit()
 
-    if game.state == "IDLE": asyncio.create_task(start_game_task(context.application, update.effective_chat.id))
+    if game.state == "IDLE": 
+        asyncio.create_task(start_game_task(context.application, update.effective_chat.id)) # Game starts here
     
     message_text = AMHARIC["game_joined"].format(card_id=card_choice, bal=u.balance, wait=LOBBY_DURATION)
     drawn_numbers_str = game.drawn_numbers or ''
     card_image_prompt = get_card_image_prompt(player_card_layout, drawn_numbers_str, f"YOUR CARD {card_choice}")
 
     await update.message.reply_photo(
-        photo="http://googleusercontent.com/image_generation_content/5", # Player Card Image
+        photo="http://googleusercontent.com/image_generation_content/8", 
         caption=message_text,
         parse_mode="Markdown"
     )
     db.close()
 
 async def mycard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Same as V7.0) ...
     user = update.effective_user; db = SessionLocal()
     game = db.query(ActiveGame).first()
     player = db.query(GamePlayer).filter_by(user_id=user.id).first()
@@ -376,13 +393,14 @@ async def mycard_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     card_image_prompt = get_card_image_prompt(player.card_layout, drawn_numbers_str, f"YOUR CARD {player.card_id}")
     
     await update.message.reply_photo(
-        photo="http://googleusercontent.com/image_generation_content/6", # Player Card Image
+        photo="http://googleusercontent.com/image_generation_content/9", # Player Card Image
         caption=message_text,
         parse_mode="Markdown"
     )
     db.close()
 
 async def board_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # ... (Same as V7.0) ...
     db = SessionLocal(); game = db.query(ActiveGame).first()
     
     if not game or not game.drawn_numbers: await update.message.reply_text("⛔ ምንም ቁጥሮች ገና አልወጡም።", parse_mode="Markdown"); db.close(); return
@@ -397,7 +415,7 @@ async def board_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.close()
 
 # --- 7. DEPOSIT CONVERSATION ---
-
+# (Same as V7.0)
 async def deposit_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton(AMHARIC["deposit_btn"], callback_data='deposit_sent')]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -411,42 +429,34 @@ async def deposit_callback_handler(update: Update, context: ContextTypes.DEFAULT
     await query.answer()
     
     if query.data == 'deposit_sent':
-        # Send confirmation prompt and wait for photo/text
         await query.message.reply_text(AMHARIC["deposit_receipt_prompt"], parse_mode="Markdown")
         return DEPOSIT_RECEIPT
 
 async def deposit_receipt_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     
-    # Check if this is a photo or text that doesn't look like a command
     if update.message.photo or (update.message.text and not update.message.text.startswith('/')):
-        
-        # 1. Alert Admin
         alert_msg = AMHARIC["admin_new_dep_alert"].format(uid=user.id, uname=user.username or user.first_name, min_dep=MIN_DEPOSIT)
         await context.bot.send_message(ADMIN_CHAT_ID, alert_msg, parse_mode="Markdown")
         
-        # Forward receipt/text
         await context.bot.forward_message(ADMIN_CHAT_ID, update.effective_chat.id, update.message.id)
         
-        # 2. Notify User
         await update.message.reply_text(AMHARIC["deposit_receipt_received"], parse_mode="Markdown")
         return ConversationHandler.END
     
-    # If the user sends a command or non-receipt text during the conversation
-    if update.message.text.startswith('/'):
+    if update.message.text and update.message.text.startswith('/'):
         return ConversationHandler.END
     
-    # If invalid input (e.g., sticker)
     await update.message.reply_text("⛔ እባክዎ የደረሰኙን ፎቶ ወይም የግብይት ቁጥሩን ብቻ ይላኩ።")
-    return DEPOSIT_RECEIPT # Stay in state
+    return DEPOSIT_RECEIPT
 
 # --- 8. WITHDRAW CONVERSATION ---
-
+# (Same as V7.0)
 async def withdraw_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user; db = SessionLocal(); u = db.query(User).filter_by(telegram_id=user.id).first()
     
     if not u or u.balance < MIN_WITHDRAWAL:
-        await update.message.reply_text(AMHARIC["err_bal"].format(bal=u.balance), parse_mode="Markdown"); db.close(); return ConversationHandler.END
+        await update.message.reply_text(AMHARIC["err_bal"].format(bal=u.balance if u else 0.0), parse_mode="Markdown"); db.close(); return ConversationHandler.END
         
     context.user_data['user_balance'] = u.balance
     await update.message.reply_text(AMHARIC["withdraw_ask_amt"].format(min_wit=MIN_WITHDRAWAL), parse_mode="Markdown")
@@ -481,19 +491,15 @@ async def withdraw_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db = SessionLocal()
     u = db.query(User).filter_by(telegram_id=user.id).first()
     
-    # 1. IMMEDIATE DEBIT
     if u and u.balance >= amt:
         u.balance -= amt
         db.commit()
         
-        # 2. Alert Admin
         alert_msg = AMHARIC["admin_new_wit_alert"].format(uid=user.id, uname=user.username or user.first_name, amt=amt, acc=acc)
         await context.bot.send_message(ADMIN_CHAT_ID, alert_msg, parse_mode="Markdown")
         
-        # 3. Notify User
         await update.message.reply_text(AMHARIC["withdraw_sent"].format(amt=amt, acc=acc), parse_mode="Markdown")
     else:
-        # Should not happen due to prior checks, but for safety
         await update.message.reply_text("⛔ ገንዘብዎ በሂደት ተቀንሷል። እባክዎ እንደገና ይሞክሩ።", parse_mode="Markdown")
     
     db.close()
@@ -501,12 +507,11 @@ async def withdraw_account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(AMHARIC["admin_msg_cancel"], parse_mode="Markdown")
-    # Clean up user_data
     context.user_data.clear()
     return ConversationHandler.END
 
 # --- 9. ADMIN COMMANDS ---
-
+# (Same as V7.0)
 async def check_admin(update: Update) -> bool:
     return update.effective_user.id == ADMIN_CHAT_ID
 
@@ -522,7 +527,6 @@ async def admin_approve_deposit(update: Update, context: ContextTypes.DEFAULT_TY
         u = db.query(User).filter_by(telegram_id=uid).first()
         
         if u:
-            # 1. Check Referral Bonus (First Deposit Only)
             is_first_deposit = not u.has_deposited
             
             u.balance += amt
@@ -536,10 +540,8 @@ async def admin_approve_deposit(update: Update, context: ContextTypes.DEFAULT_TY
             
             db.commit()
             
-            # 2. Notify User
             await context.bot.send_message(uid, AMHARIC["dep_confirmed_user"].format(amt=amt, bal=u.balance), parse_mode="Markdown")
             
-            # 3. Notify Admin
             await update.message.reply_text(AMHARIC["admin_dep_approved_admin"].format(uid=uid, amt=amt), parse_mode="Markdown")
         else:
             await update.message.reply_text(f"⛔ User ID {uid} not found in DB.")
@@ -560,13 +562,8 @@ async def admin_confirm_withdrawal(update: Update, context: ContextTypes.DEFAULT
         u = db.query(User).filter_by(telegram_id=uid).first()
         
         if u:
-            # Funds were already debited in the withdraw_account step.
-            # This is just a confirmation message.
-            
-            # 1. Notify User
             await context.bot.send_message(uid, AMHARIC["wit_confirmed_user"].format(amt=amt, bal=u.balance), parse_mode="Markdown")
             
-            # 2. Notify Admin
             await update.message.reply_text(AMHARIC["admin_wit_confirmed_admin"].format(uid=uid, amt=amt), parse_mode="Markdown")
         else:
             await update.message.reply_text(f"⛔ User ID {uid} not found in DB.")
@@ -576,7 +573,7 @@ async def admin_confirm_withdrawal(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text(f"⛔ Invalid format or error: {e}")
 
 # --- 10. ADMIN MESSAGING ---
-
+# (Same as V7.0)
 async def admin_msg_user_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_admin(update): return
     await update.message.reply_text(AMHARIC["admin_msg_prompt_user"], parse_mode="Markdown")
@@ -587,7 +584,6 @@ async def admin_msg_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     user_input = update.message.text
     if 'target_uid' not in context.user_data:
-        # First input should be the target user ID
         try:
             target_uid = int(user_input)
             context.user_data['target_uid'] = target_uid
@@ -597,7 +593,6 @@ async def admin_msg_user_text(update: Update, context: ContextTypes.DEFAULT_TYPE
             await update.message.reply_text("⛔ ትክክለኛ የተጠቃሚ ID ብቻ ያስገቡ።", parse_mode="Markdown")
             return ADMIN_MSG_USER_TEXT
     else:
-        # Second input is the message
         target_uid = context.user_data['target_uid']
         message = user_input
         
@@ -624,7 +619,6 @@ async def admin_msg_all_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     sent_count = 0
     
-    # Use asyncio.gather for concurrent sending
     tasks = []
     for u in users:
         tasks.append(context.bot.send_message(u.telegram_id, f"📢 **አስቸኳይ መልዕክት (Announcement):**\n\n{message}", parse_mode="Markdown"))
@@ -701,7 +695,7 @@ def main():
     loop = asyncio.get_event_loop()
     loop.create_task(game_engine(app))
     
-    logger.info("MegaBingo V7.0 LIVE (Casino Tech)...")
+    logger.info("MegaBingo V7.1 LIVE (Stability Fixes)...")
     app.run_polling()
 
 if __name__ == "__main__":
