@@ -10,7 +10,6 @@ from sqlalchemy.orm import sessionmaker
 # --- 1. Configuration and Logging ---
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN") 
 if not BOT_TOKEN: 
-    # This will cause the deployment to fail immediately if the token isn't set
     raise ValueError("TELEGRAM_BOT_TOKEN environment variable not set.")
 
 logging.basicConfig(
@@ -23,7 +22,8 @@ logger = logging.getLogger(__name__)
 SQLALCHEMY_DATABASE_URL = "sqlite:///./data.db" 
 engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-Base = declarative_base()
+# The MovedIn20Warning shown in your logs is harmless, as the function still works.
+Base = declarative_base() 
 
 class GameState(enum.Enum):
     IDLE = 'IDLE'; LOBBY = 'LOBBY'; RUNNING = 'RUNNING'; PAUSED = 'PAUSED'
@@ -42,39 +42,32 @@ class PlayerCard(Base):
     __tablename__ = "player_cards"
     user_id = Column(Integer, primary_key=True)
     chat_id = Column(Integer)
-    card_data = Column(String, nullable=False) # Stores 'B:1,2,3...|I:16,17...'
+    card_data = Column(String, nullable=False)
 
 Base.metadata.create_all(bind=engine)
 
 # --- 3. Utility Functions ---
 
 def generate_bingo_card_numbers():
-    """Generates a standard 5x5 Bingo card (B-75)."""
     card = {}
     card['B'] = random.sample(range(1, 16), 5)
     card['I'] = random.sample(range(16, 31), 5)
-    card['N'] = random.sample(range(31, 46), 4) # 4 numbers, one free space
+    card['N'] = random.sample(range(31, 46), 4)
     card['G'] = random.sample(range(46, 61), 5)
     card['O'] = random.sample(range(61, 76), 5)
     data_list = [f"{col}:{','.join(map(str, nums))}" for col, nums in card.items()]
     return card, "|".join(data_list)
 
 def render_bingo_card_image(card_data_string, drawn_numbers_list=None):
-    """Renders the bingo card as an image using PIL."""
     if drawn_numbers_list is None: drawn_numbers_list = []
-        
-    # Reconstruct card dictionary from string
     card = {}; drawn_nums_set = set()
     for item in card_data_string.split('|'):
         col, nums_str = item.split(':')
         card[col] = [int(n) for n in nums_str.split(',')]
-        
-    # Extract just the number for comparison (e.g., 'B-1' -> 1)
     for drawn in drawn_numbers_list:
         try: drawn_nums_set.add(int(drawn.split('-')[1]))
         except: pass
         
-    # Setup Image
     CARD_SIZE = (500, 550); img = Image.new('RGB', CARD_SIZE, color='white')
     draw = ImageDraw.Draw(img)
     try:
@@ -86,41 +79,30 @@ def render_bingo_card_image(card_data_string, drawn_numbers_list=None):
 
     COLUMNS = ['B', 'I', 'N', 'G', 'O']; CELL_SIZE = 100; START_Y = 50
     
-    # Draw Grid and Headers
     for i, col_name in enumerate(COLUMNS):
         x = i * CELL_SIZE
         draw.rectangle([x, 0, x + CELL_SIZE, START_Y], outline='black', fill='#ddd')
         draw.text((x + 50, 5), col_name, fill='black', font=font_col, anchor='mm')
-        
         numbers = card[col_name]
         for j in range(5):
             y = START_Y + j * CELL_SIZE
             draw.rectangle([x, y, x + CELL_SIZE, y + CELL_SIZE], outline='black')
-            
-            # Free Space Logic
             if col_name == 'N' and j == 2:
                 num = "FREE"; fill_color = 'red'
-                
             elif j < len(numbers):
                 num = str(numbers[j])
                 fill_color = 'green' if numbers[j] in drawn_nums_set else 'black'
             else:
                 num = ""; fill_color = 'black'
-            
             draw.text((x + 50, y + 50), num, fill=fill_color, font=font_num, anchor='mm')
 
-    # Save to buffer
-    bio = BytesIO()
-    bio.name = 'bingo_card.png'
-    img.save(bio, 'PNG')
-    bio.seek(0)
+    bio = BytesIO(); bio.name = 'bingo_card.png'
+    img.save(bio, 'PNG'); bio.seek(0)
     return bio
 
 def get_next_bingo_number(drawn_numbers_str):
-    """Calculates the next unique Bingo number."""
     all_numbers = list(range(1, 76))
     drawn_list = [int(n.split('-')[1]) for n in drawn_numbers_str.split(',') if n and '-' in n]
-    
     available_numbers = [n for n in all_numbers if n not in drawn_list]
     
     if not available_numbers: return None, True
@@ -135,13 +117,15 @@ def get_next_bingo_number(drawn_numbers_str):
     
     return f"{col}-{next_num}", False
 
-# --- 4. Game Engine (V7.7 Persistence Logic) ---
+# --- 4. Game Engine (V7.7 Automatic Worker Logic) ---
 DRAW_INTERVAL_SECONDS = 5
 LOBBY_CHECK_INTERVAL_SECONDS = 10
 
 async def game_engine(app: Application):
+    """The background loop that automatically resumes and runs the game."""
     while True:
         db = SessionLocal(); game = db.query(ActiveGame).first()
+        
         if game is None or game.state == GameState.IDLE:
             db.close(); await asyncio.sleep(LOBBY_CHECK_INTERVAL_SECONDS); continue
 
@@ -168,7 +152,6 @@ async def game_engine(app: Application):
                 drawn_list = game.drawn_numbers.split(',')
                 message_text = f"🚨 **Number {len(drawn_list)} Called!**\n\n🎯 New Number: `{next_number}`"
                 
-                # Update Call Message
                 if game.last_call_message_id and game.chat_id:
                      await app.bot.edit_message_text(
                          chat_id=game.chat_id, message_id=game.last_call_message_id, 
@@ -247,23 +230,24 @@ async def view_card(update: Update, context):
 async def all_other_messages(update: Update, context):
     pass
 
-# --- 6. Main Application Entry Point (V7.7 Persistence Logic) ---
+# --- 6. Main Application Entry Point (V7.7 Automatic Recovery) ---
 
 async def resume_running_game(app: Application):
-    """V7.7: Checks the DB on startup and notifies chat if game is resumed."""
+    """V7.7: Checks the DB on startup and automatically resumes the game."""
     db = SessionLocal(); game = db.query(ActiveGame).filter(ActiveGame.state != GameState.IDLE).first()
     
     if game and game.chat_id:
         if game.state == GameState.RUNNING:
             drawn_list = [n for n in game.drawn_numbers.split(',') if n]; drawn_count = len(drawn_list)
-            message = (f"⚠️ **Game Resumed!** Bot restarted. Continuing from **{drawn_count}th** number drawn.")
+            message = (f"✅ **Game Automatically Resumed!** Continuing from **{drawn_count}th** number drawn.")
         elif game.state == GameState.LOBBY:
-            message = ("⚠️ **Lobby Resumed!** The bot is back online and waiting for players.")
+            message = ("✅ **Lobby Automatically Resumed!** Waiting for more players.")
         else:
-            message = "⚠️ **System Restart:** The bot has restarted. Game state is preserved."
+            message = "✅ **System Restart:** The bot has restarted. Game state is preserved."
 
         try:
             await app.bot.send_message(game.chat_id, message, parse_mode="Markdown")
+            logger.info(f"Successfully resumed game in chat {game.chat_id} with state {game.state}")
         except Exception as e:
             logger.error(f"Failed to send resume notification to chat {game.chat_id}: {e}")
             
@@ -273,22 +257,28 @@ def main() -> None:
     """Starts the bot."""
     app = Application.builder().token(BOT_TOKEN).build()
 
-    # Handlers (CORRECTED LINE BELOW)
-    app.add_handler(CommandHandler("start", start_command)) # <--- FIX APPLIED HERE
+    # Handlers (Final Corrected Names)
+    app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("join", join_game))
     app.add_handler(CommandHandler("card", view_card))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, all_other_messages))
 
-    # CRITICAL RECOVERY STEP
+    # CRITICAL AUTOMATIC RECOVERY STEP
     try:
+        # Step 1: Run the synchronous part of the resume check before polling
         asyncio.run(resume_running_game(app)) 
     except Exception as e:
-        logger.error(f"Error during game resume process: {e}")
+        logger.error(f"Error during initial game resume process: {e}")
 
-    # Start the game engine background task
-    app.loop.create_task(game_engine(app))
+    # Step 2: Fix for AttributeError: 'Application' object has no attribute 'loop'
+    async def post_init(application: Application) -> None:
+        """Runs after the Application is initialized to start the non-blocking game engine task."""
+        logger.info("Starting game_engine background task via post_init.")
+        asyncio.create_task(game_engine(application))
+
+    app.post_init = post_init
     
-    logger.info("MegaBingo V7.7 FULL CODE LIVE... Starting Polling.")
+    logger.info("MegaBingo V7.7 FULL AUTO-RECOVERY LIVE... Starting Polling.")
     app.run_polling(poll_interval=1.0, allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
